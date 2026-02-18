@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for reflect_utils module."""
+
 import json
 import os
 import sys
@@ -12,6 +13,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from lib.reflect_utils import (
+    get_runtime,
+    get_platform_dir,
+    get_memory_config_dir,
     get_queue_path,
     get_backup_dir,
     get_claude_dir,
@@ -24,6 +28,8 @@ from lib.reflect_utils import (
     create_queue_item,
     extract_user_messages,
     extract_tool_rejections,
+    find_memory_files,
+    suggest_memory_file,
     find_claude_files,
     suggest_claude_file,
     should_include_message,
@@ -36,12 +42,28 @@ from lib.reflect_utils import (
 class TestPathUtilities(unittest.TestCase):
     """Tests for path utility functions."""
 
+    def setUp(self):
+        self._runtime_patch = patch.dict(
+            os.environ, {"REFLECT_RUNTIME": "claude"}, clear=False
+        )
+        self._runtime_patch.start()
+
+    def tearDown(self):
+        self._runtime_patch.stop()
+
     def test_get_queue_path(self):
         """Test queue path returns correct location."""
         path = get_queue_path()
         self.assertIsInstance(path, Path)
         self.assertEqual(path.name, "learnings-queue.json")
         self.assertEqual(path.parent.name, ".claude")
+
+    def test_get_queue_path_opencode_runtime(self):
+        """Test queue path switches to OpenCode runtime when configured."""
+        with patch.dict(os.environ, {"REFLECT_RUNTIME": "opencode"}, clear=False):
+            path = get_queue_path()
+            self.assertEqual(path.name, "learnings-queue.json")
+            self.assertEqual(path.parent.name, "opencode")
 
     def test_get_backup_dir(self):
         """Test backup dir returns correct location."""
@@ -50,11 +72,21 @@ class TestPathUtilities(unittest.TestCase):
         self.assertEqual(path.name, "learnings-backups")
         self.assertEqual(path.parent.name, ".claude")
 
-    def test_get_claude_dir(self):
-        """Test claude dir returns correct location."""
-        path = get_claude_dir()
+    def test_get_memory_config_dir(self):
+        """Test memory config dir returns correct location."""
+        path = get_memory_config_dir()
         self.assertIsInstance(path, Path)
         self.assertEqual(path.name, ".claude")
+
+    def test_get_claude_dir_alias(self):
+        """Test legacy alias still returns same path."""
+        self.assertEqual(get_claude_dir(), get_memory_config_dir())
+
+    def test_get_runtime_and_platform_dir_opencode(self):
+        """Test explicit OpenCode runtime detection."""
+        with patch.dict(os.environ, {"REFLECT_RUNTIME": "opencode"}, clear=False):
+            self.assertEqual(get_runtime(), "opencode")
+            self.assertEqual(get_platform_dir().name, "opencode")
 
 
 class TestQueueOperations(unittest.TestCase):
@@ -68,6 +100,7 @@ class TestQueueOperations(unittest.TestCase):
     def tearDown(self):
         """Clean up temporary files."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     @patch("lib.reflect_utils.get_queue_path")
@@ -261,6 +294,23 @@ class TestPatternDetection(unittest.TestCase):
         self.assertEqual(item_type, "guardrail")
         self.assertIn("minimal-changes", patterns)
 
+    def test_guardrail_naming_preference_call_me(self):
+        """Test detection of naming preference directives."""
+        result = detect_patterns("Going forward, call me Mr. Professor Bark")
+        item_type, patterns, confidence, sentiment, decay = result
+
+        self.assertEqual(item_type, "guardrail")
+        self.assertIn("naming-preference", patterns)
+        self.assertGreaterEqual(confidence, 0.90)
+
+    def test_guardrail_naming_preference_i_want(self):
+        """Test naming preference still detected with task-request phrasing."""
+        result = detect_patterns("I want you to call me Mr. Professor Bark")
+        item_type, patterns, confidence, sentiment, decay = result
+
+        self.assertEqual(item_type, "guardrail")
+        self.assertIn("naming-preference", patterns)
+
     def test_no_pattern_match(self):
         """Test text without patterns returns None type."""
         result = detect_patterns("Hello, how are you?")
@@ -352,6 +402,7 @@ class TestSessionExtraction(unittest.TestCase):
     def tearDown(self):
         """Clean up temporary files."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_extract_user_messages_basic(self):
@@ -359,19 +410,14 @@ class TestSessionExtraction(unittest.TestCase):
         session_data = [
             {
                 "type": "user",
-                "message": {
-                    "content": [{"type": "text", "text": "Hello world"}]
-                }
+                "message": {"content": [{"type": "text", "text": "Hello world"}]},
             },
-            {
-                "type": "assistant",
-                "message": {"content": "Response"}
-            },
+            {"type": "assistant", "message": {"content": "Response"}},
             {
                 "type": "user",
                 "message": {
                     "content": [{"type": "text", "text": "no, use Python instead"}]
-                }
+                },
             },
         ]
 
@@ -389,16 +435,9 @@ class TestSessionExtraction(unittest.TestCase):
         session_data = [
             {
                 "type": "user",
-                "message": {
-                    "content": "This is a string content message"
-                }
+                "message": {"content": "This is a string content message"},
             },
-            {
-                "type": "user",
-                "message": {
-                    "content": "no, use this approach instead"
-                }
-            },
+            {"type": "user", "message": {"content": "no, use this approach instead"}},
         ]
 
         with open(self.session_file, "w") as f:
@@ -416,15 +455,11 @@ class TestSessionExtraction(unittest.TestCase):
             {
                 "type": "user",
                 "isMeta": True,
-                "message": {
-                    "content": [{"type": "text", "text": "Meta message"}]
-                }
+                "message": {"content": [{"type": "text", "text": "Meta message"}]},
             },
             {
                 "type": "user",
-                "message": {
-                    "content": [{"type": "text", "text": "Regular message"}]
-                }
+                "message": {"content": [{"type": "text", "text": "Regular message"}]},
             },
         ]
 
@@ -441,21 +476,17 @@ class TestSessionExtraction(unittest.TestCase):
         session_data = [
             {
                 "type": "user",
-                "message": {
-                    "content": [{"type": "text", "text": "Hello world"}]
-                }
+                "message": {"content": [{"type": "text", "text": "Hello world"}]},
             },
             {
                 "type": "user",
-                "message": {
-                    "content": [{"type": "text", "text": "no, use Python"}]
-                }
+                "message": {"content": [{"type": "text", "text": "no, use Python"}]},
             },
             {
                 "type": "user",
                 "message": {
                     "content": [{"type": "text", "text": "remember: always test"}]
-                }
+                },
             },
         ]
 
@@ -485,6 +516,7 @@ class TestToolRejectionExtraction(unittest.TestCase):
     def tearDown(self):
         """Clean up temporary files."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_extract_tool_rejection_with_feedback(self):
@@ -499,10 +531,10 @@ class TestToolRejectionExtraction(unittest.TestCase):
                         {
                             "type": "tool_result",
                             "is_error": True,
-                            "content": "The user doesn't want to proceed\nthe user said:\nDon't delete that file"
+                            "content": "The user doesn't want to proceed\nthe user said:\nDon't delete that file",
                         }
                     ]
-                }
+                },
             },
         ]
 
@@ -524,10 +556,10 @@ class TestToolRejectionExtraction(unittest.TestCase):
                         {
                             "type": "tool_result",
                             "is_error": True,
-                            "content": "The user doesn't want to proceed\nthe user said:\n"
+                            "content": "The user doesn't want to proceed\nthe user said:\n",
                         }
                     ]
-                }
+                },
             },
         ]
 
@@ -548,10 +580,10 @@ class TestToolRejectionExtraction(unittest.TestCase):
                         {
                             "type": "tool_result",
                             "is_error": False,
-                            "content": "File created successfully"
+                            "content": "File created successfully",
                         }
                     ]
-                }
+                },
             },
         ]
 
@@ -575,6 +607,7 @@ class TestClaudeFileDiscovery(unittest.TestCase):
         """Clean up temporary files and restore cwd."""
         os.chdir(self.original_cwd)
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_find_claude_files_root_only(self):
@@ -583,7 +616,7 @@ class TestClaudeFileDiscovery(unittest.TestCase):
         root_claude = Path(self.temp_dir) / "CLAUDE.md"
         root_claude.write_text("# Test CLAUDE.md")
 
-        files = find_claude_files(self.temp_dir)
+        files = find_memory_files(self.temp_dir)
 
         # Should find global and root (if global exists)
         root_files = [f for f in files if f["type"] == "root"]
@@ -602,7 +635,7 @@ class TestClaudeFileDiscovery(unittest.TestCase):
         sub_claude = subdir / "CLAUDE.md"
         sub_claude.write_text("# Src")
 
-        files = find_claude_files(self.temp_dir)
+        files = find_memory_files(self.temp_dir)
 
         subdir_files = [f for f in files if f["type"] == "subdirectory"]
         self.assertEqual(len(subdir_files), 1)
@@ -616,7 +649,7 @@ class TestClaudeFileDiscovery(unittest.TestCase):
         excluded_claude = node_modules / "CLAUDE.md"
         excluded_claude.write_text("# Should be excluded")
 
-        files = find_claude_files(self.temp_dir)
+        files = find_memory_files(self.temp_dir)
 
         # Should not find the node_modules CLAUDE.md
         all_paths = [f["path"] for f in files]
@@ -630,7 +663,7 @@ class TestClaudeFileDiscovery(unittest.TestCase):
         excluded_claude = git_dir / "CLAUDE.md"
         excluded_claude.write_text("# Should be excluded")
 
-        files = find_claude_files(self.temp_dir)
+        files = find_memory_files(self.temp_dir)
 
         # Should not find the .git CLAUDE.md
         all_paths = [f["path"] for f in files]
@@ -650,48 +683,84 @@ class TestSuggestClaudeFile(unittest.TestCase):
     def test_suggest_global_for_model_names(self):
         """Test that model names suggest global CLAUDE.md."""
         files = [
-            {"path": "/home/.claude/CLAUDE.md", "relative_path": "~/.claude/CLAUDE.md", "type": "global"},
-            {"path": "/project/CLAUDE.md", "relative_path": "./CLAUDE.md", "type": "root"},
+            {
+                "path": "/home/.claude/CLAUDE.md",
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            },
+            {
+                "path": "/project/CLAUDE.md",
+                "relative_path": "./CLAUDE.md",
+                "type": "root",
+            },
         ]
 
-        result = suggest_claude_file("Use gpt-5.1 for reasoning tasks", files)
+        result = suggest_memory_file("Use gpt-5.1 for reasoning tasks", files)
         self.assertEqual(result, "~/.claude/CLAUDE.md")
 
-        result = suggest_claude_file("claude-opus is better for coding", files)
+        result = suggest_memory_file("claude-opus is better for coding", files)
         self.assertEqual(result, "~/.claude/CLAUDE.md")
 
     def test_suggest_global_for_always_never(self):
         """Test that 'always/never' patterns suggest global."""
         files = [
-            {"path": "/home/.claude/CLAUDE.md", "relative_path": "~/.claude/CLAUDE.md", "type": "global"},
-            {"path": "/project/CLAUDE.md", "relative_path": "./CLAUDE.md", "type": "root"},
+            {
+                "path": "/home/.claude/CLAUDE.md",
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            },
+            {
+                "path": "/project/CLAUDE.md",
+                "relative_path": "./CLAUDE.md",
+                "type": "root",
+            },
         ]
 
-        result = suggest_claude_file("always run tests before committing", files)
+        result = suggest_memory_file("always run tests before committing", files)
         self.assertEqual(result, "~/.claude/CLAUDE.md")
 
-        result = suggest_claude_file("never use force push on main", files)
+        result = suggest_memory_file("never use force push on main", files)
         self.assertEqual(result, "~/.claude/CLAUDE.md")
 
     def test_suggest_subdirectory_when_mentioned(self):
         """Test suggestion based on directory name in learning."""
         files = [
-            {"path": "/home/.claude/CLAUDE.md", "relative_path": "~/.claude/CLAUDE.md", "type": "global"},
-            {"path": "/project/CLAUDE.md", "relative_path": "./CLAUDE.md", "type": "root"},
-            {"path": "/project/api/CLAUDE.md", "relative_path": "./api/CLAUDE.md", "type": "subdirectory"},
+            {
+                "path": "/home/.claude/CLAUDE.md",
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            },
+            {
+                "path": "/project/CLAUDE.md",
+                "relative_path": "./CLAUDE.md",
+                "type": "root",
+            },
+            {
+                "path": "/project/api/CLAUDE.md",
+                "relative_path": "./api/CLAUDE.md",
+                "type": "subdirectory",
+            },
         ]
 
-        result = suggest_claude_file("The api module uses REST conventions", files)
+        result = suggest_memory_file("The api module uses REST conventions", files)
         self.assertEqual(result, "./api/CLAUDE.md")
 
     def test_suggest_none_for_ambiguous(self):
         """Test that ambiguous learnings return None (let Claude decide)."""
         files = [
-            {"path": "/home/.claude/CLAUDE.md", "relative_path": "~/.claude/CLAUDE.md", "type": "global"},
-            {"path": "/project/CLAUDE.md", "relative_path": "./CLAUDE.md", "type": "root"},
+            {
+                "path": "/home/.claude/CLAUDE.md",
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            },
+            {
+                "path": "/project/CLAUDE.md",
+                "relative_path": "./CLAUDE.md",
+                "type": "root",
+            },
         ]
 
-        result = suggest_claude_file("Use database connection pooling", files)
+        result = suggest_memory_file("Use database connection pooling", files)
         self.assertIsNone(result)
 
 
@@ -717,8 +786,14 @@ class TestShouldIncludeMessage(unittest.TestCase):
 
     def test_xml_tag_excluded(self):
         """Messages starting with XML tags should be excluded."""
-        self.assertFalse(should_include_message("<task-notification>some content</task-notification>"))
-        self.assertFalse(should_include_message("<system-reminder>use X not Y</system-reminder>"))
+        self.assertFalse(
+            should_include_message(
+                "<task-notification>some content</task-notification>"
+            )
+        )
+        self.assertFalse(
+            should_include_message("<system-reminder>use X not Y</system-reminder>")
+        )
 
     def test_json_excluded(self):
         """Messages starting with JSON should be excluded."""
@@ -730,20 +805,22 @@ class TestShouldIncludeMessage(unittest.TestCase):
 
     def test_session_continuation_excluded(self):
         """Session continuation markers should be excluded."""
-        self.assertFalse(should_include_message(
-            "This session is being continued from a previous conversation"
-        ))
+        self.assertFalse(
+            should_include_message(
+                "This session is being continued from a previous conversation"
+            )
+        )
 
     def test_system_reminder_with_correction_pattern(self):
         """System reminders containing correction-like text should still be excluded."""
-        msg = '<system-reminder>use context7 mcp every time, don\'t use old API</system-reminder>'
+        msg = "<system-reminder>use context7 mcp every time, don't use old API</system-reminder>"
         self.assertFalse(should_include_message(msg))
 
     def test_task_notification_with_correction_pattern(self):
         """Task notifications with correction patterns should be excluded."""
         msg = (
             '<task-notification>Skill "superpowers:using-superpowers" '
-            'loaded. Don\'t use deprecated patterns.</task-notification>'
+            "loaded. Don't use deprecated patterns.</task-notification>"
         )
         self.assertFalse(should_include_message(msg))
 
@@ -768,6 +845,7 @@ class TestClaudeFileDiscoveryBackwardCompat(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_old_types_still_returned(self):
@@ -800,8 +878,16 @@ class TestSuggestClaudeFileBackwardCompat(unittest.TestCase):
     def test_works_without_learning_type(self):
         """Calling without learning_type still works (default None)."""
         files = [
-            {"path": "/home/.claude/CLAUDE.md", "relative_path": "~/.claude/CLAUDE.md", "type": "global"},
-            {"path": "/project/CLAUDE.md", "relative_path": "./CLAUDE.md", "type": "root"},
+            {
+                "path": "/home/.claude/CLAUDE.md",
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            },
+            {
+                "path": "/project/CLAUDE.md",
+                "relative_path": "./CLAUDE.md",
+                "type": "root",
+            },
         ]
         # Should work exactly as before
         result = suggest_claude_file("use gpt-5.1 for reasoning", files)
@@ -813,7 +899,11 @@ class TestSuggestClaudeFileBackwardCompat(unittest.TestCase):
     def test_two_arg_call_still_works(self):
         """Positional two-arg call (old API) still works."""
         files = [
-            {"path": "/home/.claude/CLAUDE.md", "relative_path": "~/.claude/CLAUDE.md", "type": "global"},
+            {
+                "path": "/home/.claude/CLAUDE.md",
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            },
         ]
         result = suggest_claude_file("always use venv", files)
         self.assertEqual(result, "~/.claude/CLAUDE.md")
@@ -831,7 +921,7 @@ class TestCaptureLearningFiltering(unittest.TestCase):
         """System content should be filtered BEFORE reaching detect_patterns."""
         # This is the key false-positive scenario: system-reminder contains
         # correction-like text ("use X not Y") but should never be captured.
-        system_msg = '<system-reminder>use context7 mcp every time</system-reminder>'
+        system_msg = "<system-reminder>use context7 mcp every time</system-reminder>"
         self.assertFalse(should_include_message(system_msg))
 
         # In contrast, a real user correction should pass the filter
@@ -844,7 +934,10 @@ class TestCaptureLearningFiltering(unittest.TestCase):
 
         long_prompt = "a" * (MAX_CAPTURE_PROMPT_LENGTH + 1)
         # Simulates the check in capture_learning.py
-        should_skip = len(long_prompt) > MAX_CAPTURE_PROMPT_LENGTH and "remember:" not in long_prompt.lower()
+        should_skip = (
+            len(long_prompt) > MAX_CAPTURE_PROMPT_LENGTH
+            and "remember:" not in long_prompt.lower()
+        )
         self.assertTrue(should_skip)
 
     def test_long_prompt_with_remember_allowed(self):
@@ -852,7 +945,10 @@ class TestCaptureLearningFiltering(unittest.TestCase):
         from lib.reflect_utils import MAX_CAPTURE_PROMPT_LENGTH
 
         long_remember = "remember: " + "a" * MAX_CAPTURE_PROMPT_LENGTH
-        should_skip = len(long_remember) > MAX_CAPTURE_PROMPT_LENGTH and "remember:" not in long_remember.lower()
+        should_skip = (
+            len(long_remember) > MAX_CAPTURE_PROMPT_LENGTH
+            and "remember:" not in long_remember.lower()
+        )
         self.assertFalse(should_skip)
 
     def test_short_real_correction_passes_both_filters(self):

@@ -1,0 +1,33 @@
+{
+  "name": "opencode-reflect",
+  "version": "0.1.0",
+  "description": "Self-reflection plugin for OpenCode",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BayramAnnakov/claude-reflect"
+  },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    ".opencode/commands",
+    "README.md",
+    "OPENCODE.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^24.5.2",
+    "rimraf": "^6.1.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -15,10 +15,12 @@ Options:
     --all               Scan all sessions across all projects
     --json              Output as JSON instead of human-readable format
 """
+
 import sys
 import os
 import argparse
 from pathlib import Path
+from typing import Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,14 +28,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.reflect_utils import (
     extract_tool_errors,
     aggregate_tool_errors,
-    get_claude_dir,
+    get_memory_config_dir,
 )
 
 
-def find_session_files(project_dir: str = None, all_projects: bool = False) -> list:
+def find_session_files(
+    project_dir: Optional[str] = None, all_projects: bool = False
+) -> list:
     """Find session files to scan."""
-    claude_dir = get_claude_dir()
-    projects_dir = claude_dir / "projects"
+    memory_dir = get_memory_config_dir()
+    projects_dir = memory_dir / "projects"
 
     if not projects_dir.exists():
         return []
@@ -70,38 +74,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Extract repeated tool execution errors from session files"
     )
-    parser.add_argument(
-        "files",
-        nargs="*",
-        help="Session file(s) to scan"
-    )
+    parser.add_argument("files", nargs="*", help="Session file(s) to scan")
     parser.add_argument(
         "--min-count",
         type=int,
         default=2,
-        help="Minimum occurrences to report (default: 2)"
+        help="Minimum occurrences to report (default: 2)",
     )
     parser.add_argument(
         "--include-all",
         action="store_true",
-        help="Include all errors, not just project-specific patterns"
+        help="Include all errors, not just project-specific patterns",
     )
     parser.add_argument(
-        "--project",
-        type=str,
-        help="Scan all sessions for a specific project directory"
+        "--project", type=str, help="Scan all sessions for a specific project directory"
     )
     parser.add_argument(
         "--all",
         action="store_true",
         dest="all_projects",
-        help="Scan all sessions across all projects"
+        help="Scan all sessions across all projects",
     )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output as JSON"
-    )
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
 
@@ -126,8 +120,7 @@ def main() -> int:
             continue
 
         errors = extract_tool_errors(
-            session_file,
-            project_specific_only=not args.include_all
+            session_file, project_specific_only=not args.include_all
         )
         all_errors.extend(errors)
 
@@ -151,17 +144,24 @@ def main() -> int:
     # Output results
     if args.json:
         import json
+
         print(json.dumps(aggregated, indent=2))
     else:
-        print(f"=== Tool Execution Error Patterns (min {args.min_count} occurrences) ===\n")
-        print(f"Scanned {len(session_files)} session file(s), found {len(all_errors)} matching errors\n")
+        print(
+            f"=== Tool Execution Error Patterns (min {args.min_count} occurrences) ===\n"
+        )
+        print(
+            f"Scanned {len(session_files)} session file(s), found {len(all_errors)} matching errors\n"
+        )
 
         for agg in aggregated:
-            print(f"[{agg['error_type']}] - {agg['count']} occurrences (confidence: {agg['confidence']:.2f})")
-            if agg['suggested_guideline']:
+            print(
+                f"[{agg['error_type']}] - {agg['count']} occurrences (confidence: {agg['confidence']:.2f})"
+            )
+            if agg["suggested_guideline"]:
                 print(f"  Suggested guideline: {agg['suggested_guideline']}")
             print(f"  Sample error:")
-            if agg['sample_errors']:
+            if agg["sample_errors"]:
                 print(f"    {agg['sample_errors'][0][:100]}...")
             print()
 

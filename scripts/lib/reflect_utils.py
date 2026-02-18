@@ -3,9 +3,11 @@
 
 Cross-platform compatible (Windows, macOS, Linux).
 """
+
 import json
 import re
 import os
+import warnings
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
@@ -14,24 +16,89 @@ from typing import List, Dict, Any, Optional, Tuple
 # Path utilities
 # =============================================================================
 
+# Legacy alias deprecation policy
+# Remove legacy symbols no earlier than v1.0.0.
+LEGACY_ALIAS_REMOVAL_VERSION = "1.0.0"
+LEGACY_ALIAS_REMOVAL_DATE = "2026-12-31"
+
+
+def _warn_legacy_alias(old_name: str, new_name: str) -> None:
+    """Emit a hard deprecation warning for legacy alias calls."""
+    warnings.warn(
+        (
+            f"{old_name}() is deprecated and will be removed in "
+            f"v{LEGACY_ALIAS_REMOVAL_VERSION} (target date: {LEGACY_ALIAS_REMOVAL_DATE}). "
+            f"Use {new_name}() instead."
+        ),
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
+def get_runtime() -> str:
+    """Detect runtime platform for storage and config paths.
+
+    Priority:
+    1. REFLECT_RUNTIME env var (explicit override)
+    2. OpenCode-specific env hints
+    3. Claude Code (default, backwards compatible)
+    """
+    explicit = os.environ.get("REFLECT_RUNTIME", "").strip().lower()
+    if explicit in {"opencode", "claude"}:
+        return explicit
+
+    opencode_hints = {
+        "OPENCODE",
+        "OPENCODE_SESSION_ID",
+        "OPENCODE_DIRECTORY",
+        "OPENCODE_PROJECT",
+    }
+    if any(k in os.environ for k in opencode_hints):
+        return "opencode"
+
+    return "claude"
+
+
+def get_platform_dir() -> Path:
+    """Get runtime config directory.
+
+    - Claude Code: ~/.claude
+    - OpenCode: ~/.config/opencode
+    """
+    if get_runtime() == "opencode":
+        return Path.home() / ".config" / "opencode"
+    return Path.home() / ".claude"
+
+
 def get_queue_path() -> Path:
     """Get path to learnings queue file."""
-    return Path.home() / ".claude" / "learnings-queue.json"
+    return get_platform_dir() / "learnings-queue.json"
 
 
 def get_backup_dir() -> Path:
     """Get path to learnings backup directory."""
-    return Path.home() / ".claude" / "learnings-backups"
+    return get_platform_dir() / "learnings-backups"
+
+
+def get_memory_config_dir() -> Path:
+    """Get runtime config directory for reflection state."""
+    return get_platform_dir()
 
 
 def get_claude_dir() -> Path:
-    """Get path to .claude directory."""
-    return Path.home() / ".claude"
+    """Deprecated alias for get_memory_config_dir().
+
+    DEPRECATION:
+    - Warns on call
+    - Planned removal in v1.0.0
+    """
+    _warn_legacy_alias("get_claude_dir", "get_memory_config_dir")
+    return get_memory_config_dir()
 
 
 def get_cleanup_period_days() -> Optional[int]:
     """Get cleanupPeriodDays from ~/.claude/settings.json. Returns None if not set."""
-    settings_path = get_claude_dir() / "settings.json"
+    settings_path = get_memory_config_dir() / "settings.json"
     if not settings_path.exists():
         return None
     try:
@@ -43,10 +110,29 @@ def get_cleanup_period_days() -> Optional[int]:
 
 # Directories to exclude when searching for CLAUDE.md files
 EXCLUDED_DIRS = {
-    'node_modules', '.git', '.svn', '.hg', 'venv', '.venv', 'env', '.env',
-    '__pycache__', '.pytest_cache', '.mypy_cache', 'dist', 'build',
-    '.next', '.nuxt', 'coverage', '.coverage', 'htmlcov',
-    'vendor', 'target', 'out', 'bin', 'obj',
+    "node_modules",
+    ".git",
+    ".svn",
+    ".hg",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "coverage",
+    ".coverage",
+    "htmlcov",
+    "vendor",
+    "target",
+    "out",
+    "bin",
+    "obj",
 }
 
 
@@ -111,7 +197,7 @@ def _parse_rule_frontmatter(filepath: Path) -> Optional[Dict[str, Any]]:
     return result if result else None
 
 
-def find_claude_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+def find_memory_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Find all memory tier files in the project tree.
 
@@ -127,31 +213,37 @@ def find_claude_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     results = []
 
     # Always include global CLAUDE.md
-    global_claude = get_claude_dir() / "CLAUDE.md"
+    global_claude = get_memory_config_dir() / "CLAUDE.md"
     if global_claude.exists():
-        results.append({
-            "path": str(global_claude),
-            "relative_path": "~/.claude/CLAUDE.md",
-            "type": "global",
-        })
+        results.append(
+            {
+                "path": str(global_claude),
+                "relative_path": "~/.claude/CLAUDE.md",
+                "type": "global",
+            }
+        )
 
     # Check root CLAUDE.md
     root_claude = root / "CLAUDE.md"
     if root_claude.exists():
-        results.append({
-            "path": str(root_claude),
-            "relative_path": "./CLAUDE.md",
-            "type": "root",
-        })
+        results.append(
+            {
+                "path": str(root_claude),
+                "relative_path": "./CLAUDE.md",
+                "type": "root",
+            }
+        )
 
     # Check CLAUDE.local.md (personal, gitignored)
     local_claude = root / "CLAUDE.local.md"
     if local_claude.exists():
-        results.append({
-            "path": str(local_claude),
-            "relative_path": "./CLAUDE.local.md",
-            "type": "local",
-        })
+        results.append(
+            {
+                "path": str(local_claude),
+                "relative_path": "./CLAUDE.local.md",
+                "type": "local",
+            }
+        )
 
     # Search for CLAUDE.md in subdirectories
     for dirpath, dirnames, filenames in os.walk(root):
@@ -166,11 +258,13 @@ def find_claude_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
             full_path = Path(dirpath) / "CLAUDE.md"
             rel_path = full_path.relative_to(root)
             # Use as_posix() for consistent forward slashes on all platforms
-            results.append({
-                "path": str(full_path),
-                "relative_path": f"./{rel_path.as_posix()}",
-                "type": "subdirectory",
-            })
+            results.append(
+                {
+                    "path": str(full_path),
+                    "relative_path": f"./{rel_path.as_posix()}",
+                    "type": "subdirectory",
+                }
+            )
 
     # Discover project rule files: .claude/rules/*.md
     project_rules_dir = root / ".claude" / "rules"
@@ -178,31 +272,46 @@ def find_claude_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         for rule_file in sorted(project_rules_dir.glob("*.md")):
             frontmatter = _parse_rule_frontmatter(rule_file)
             rel_path = rule_file.relative_to(root)
-            results.append({
-                "path": str(rule_file),
-                "relative_path": f"./{rel_path.as_posix()}",
-                "type": "rule",
-                "frontmatter": frontmatter,
-            })
+            results.append(
+                {
+                    "path": str(rule_file),
+                    "relative_path": f"./{rel_path.as_posix()}",
+                    "type": "rule",
+                    "frontmatter": frontmatter,
+                }
+            )
 
     # Discover user-level rule files: ~/.claude/rules/*.md
-    user_rules_dir = get_claude_dir() / "rules"
+    user_rules_dir = get_memory_config_dir() / "rules"
     if user_rules_dir.is_dir():
         for rule_file in sorted(user_rules_dir.glob("*.md")):
             frontmatter = _parse_rule_frontmatter(rule_file)
-            results.append({
-                "path": str(rule_file),
-                "relative_path": f"~/.claude/rules/{rule_file.name}",
-                "type": "user-rule",
-                "frontmatter": frontmatter,
-            })
+            results.append(
+                {
+                    "path": str(rule_file),
+                    "relative_path": f"~/.claude/rules/{rule_file.name}",
+                    "type": "user-rule",
+                    "frontmatter": frontmatter,
+                }
+            )
 
     return results
 
 
-def suggest_claude_file(
+def find_claude_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Deprecated alias for find_memory_files().
+
+    DEPRECATION:
+    - Warns on call
+    - Planned removal in v1.0.0
+    """
+    _warn_legacy_alias("find_claude_files", "find_memory_files")
+    return find_memory_files(root_dir)
+
+
+def suggest_memory_file(
     learning: str,
-    claude_files: List[Dict[str, Any]],
+    memory_files: List[Dict[str, Any]],
     learning_type: Optional[str] = None,
 ) -> Optional[str]:
     """
@@ -213,7 +322,7 @@ def suggest_claude_file(
 
     Args:
         learning: The learning text.
-        claude_files: List from find_claude_files().
+        memory_files: List from find_memory_files().
         learning_type: Optional type hint — 'guardrail', 'auto', 'explicit', etc.
     """
     learning_lower = learning.lower()
@@ -221,27 +330,30 @@ def suggest_claude_file(
     # Guardrails → .claude/rules/guardrails.md
     if learning_type == "guardrail":
         # Check if a guardrails rule file already exists
-        for cf in claude_files:
+        for cf in memory_files:
             if cf["type"] == "rule" and "guardrail" in Path(cf["path"]).stem.lower():
                 return cf["relative_path"]
         # Suggest creating one
         return "./.claude/rules/guardrails.md"
 
     # Model indicators → existing model-preferences rule or global CLAUDE.md
-    model_indicators = ['gpt-', 'claude-', 'gemini-', 'o3', 'o4']
+    model_indicators = ["gpt-", "claude-", "gemini-", "o3", "o4"]
     if any(ind in learning_lower for ind in model_indicators):
-        for cf in claude_files:
-            if cf["type"] in ("rule", "user-rule") and "model" in Path(cf["path"]).stem.lower():
+        for cf in memory_files:
+            if (
+                cf["type"] in ("rule", "user-rule")
+                and "model" in Path(cf["path"]).stem.lower()
+            ):
                 return cf["relative_path"]
         return "~/.claude/CLAUDE.md"
 
     # Global behavioral (always/never/prefer) → global CLAUDE.md
-    global_behavioral = ['always ', 'never ', 'prefer ']
+    global_behavioral = ["always ", "never ", "prefer "]
     if any(ind in learning_lower for ind in global_behavioral):
         return "~/.claude/CLAUDE.md"
 
     # Path-scoped rule match: learning mentions a directory covered by a rule's paths
-    for cf in claude_files:
+    for cf in memory_files:
         if cf["type"] == "rule" and cf.get("frontmatter"):
             paths = cf["frontmatter"].get("paths", [])
             if isinstance(paths, list):
@@ -250,7 +362,7 @@ def suggest_claude_file(
                         return cf["relative_path"]
 
     # Check if learning mentions a specific subdirectory
-    for cf in claude_files:
+    for cf in memory_files:
         if cf["type"] == "subdirectory":
             # Extract directory name from path
             dir_name = Path(cf["relative_path"]).parent.name.lower()
@@ -261,17 +373,36 @@ def suggest_claude_file(
     return None
 
 
+def suggest_claude_file(
+    learning: str,
+    claude_files: List[Dict[str, Any]],
+    learning_type: Optional[str] = None,
+) -> Optional[str]:
+    """Deprecated alias for suggest_memory_file().
+
+    DEPRECATION:
+    - Warns on call
+    - Planned removal in v1.0.0
+    """
+    _warn_legacy_alias("suggest_claude_file", "suggest_memory_file")
+    return suggest_memory_file(learning, claude_files, learning_type)
+
+
 # =============================================================================
 # Auto memory utilities
 # =============================================================================
+
 
 def get_project_folder_name(project_dir: Optional[str] = None) -> str:
     """Encode a project directory path using Claude Code's folder naming convention.
 
     /Users/bob/myapp → -Users-bob-myapp
     """
-    project_path = Path(project_dir).resolve() if project_dir else Path.cwd().resolve()
+    project_path = project_dir if project_dir is not None else str(Path.cwd().resolve())
     folder_name = str(project_path).replace("/", "-").replace("\\", "-")
+
+    # Normalize Windows drive prefixes (C:-foo -> foo) for cross-platform consistency.
+    folder_name = re.sub(r"^[A-Za-z]:-", "", folder_name)
     if folder_name.startswith("-"):
         folder_name = folder_name[1:]
     return "-" + folder_name
@@ -283,7 +414,7 @@ def get_auto_memory_path(project_dir: Optional[str] = None) -> Path:
     Returns ~/.claude/projects/<encoded>/memory/
     """
     folder_name = get_project_folder_name(project_dir)
-    return get_claude_dir() / "projects" / folder_name / "memory"
+    return get_memory_config_dir() / "projects" / folder_name / "memory"
 
 
 def read_auto_memory(project_dir: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -301,11 +432,13 @@ def read_auto_memory(project_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         try:
             text = md_file.read_text(encoding="utf-8")
             entries = [line.strip() for line in text.splitlines() if line.strip()]
-            results.append({
-                "file": str(md_file),
-                "name": md_file.stem,
-                "entries": entries,
-            })
+            results.append(
+                {
+                    "file": str(md_file),
+                    "name": md_file.stem,
+                    "entries": entries,
+                }
+            )
         except (IOError, OSError):
             continue
 
@@ -350,11 +483,11 @@ def read_all_memory_entries(
 
     Returns list of {text, source_file, source_type, line_number}.
     """
-    claude_files = find_claude_files(root_dir)
+    memory_files = find_memory_files(root_dir)
     entries: List[Dict[str, Any]] = []
 
     # Read entries from each CLAUDE.md / rule / local file
-    for cf in claude_files:
+    for cf in memory_files:
         filepath = Path(cf["path"])
         if cf["type"] == "global":
             filepath = Path(cf["path"])
@@ -366,12 +499,14 @@ def read_all_memory_entries(
         for line_num, line in enumerate(text.splitlines(), start=1):
             stripped = line.strip()
             if stripped.startswith("- "):
-                entries.append({
-                    "text": stripped[2:].strip(),
-                    "source_file": cf["relative_path"],
-                    "source_type": cf["type"],
-                    "line_number": line_num,
-                })
+                entries.append(
+                    {
+                        "text": stripped[2:].strip(),
+                        "source_file": cf["relative_path"],
+                        "source_type": cf["type"],
+                        "line_number": line_num,
+                    }
+                )
 
     # Read auto memory entries
     auto_memory = read_auto_memory(root_dir)
@@ -379,12 +514,14 @@ def read_all_memory_entries(
         for idx, entry_text in enumerate(mem["entries"]):
             clean = entry_text.lstrip("- ").strip()
             if clean and not clean.startswith("#"):
-                entries.append({
-                    "text": clean,
-                    "source_file": f"~/.claude/projects/.../memory/{mem['name']}.md",
-                    "source_type": "auto-memory",
-                    "line_number": idx + 1,
-                })
+                entries.append(
+                    {
+                        "text": clean,
+                        "source_file": f"~/.claude/projects/.../memory/{mem['name']}.md",
+                        "source_type": "auto-memory",
+                        "line_number": idx + 1,
+                    }
+                )
 
     return entries
 
@@ -392,6 +529,7 @@ def read_all_memory_entries(
 # =============================================================================
 # Queue operations
 # =============================================================================
+
 
 def load_queue() -> List[Dict[str, Any]]:
     """Load learnings queue from file."""
@@ -421,6 +559,7 @@ def append_to_queue(item: Dict[str, Any]) -> None:
 # =============================================================================
 # Timestamp utilities
 # =============================================================================
+
 
 def iso_timestamp() -> str:
     """Get current UTC timestamp in ISO 8601 format."""
@@ -473,13 +612,44 @@ CORRECTION_PATTERNS = [
 # Format: (regex_pattern, pattern_name, confidence, decay_days)
 GUARDRAIL_PATTERNS = [
     (r"don't (?:add|include|create) .{1,40} unless", "dont-unless-asked", 0.90, 120),
-    (r"only (?:change|modify|edit|touch) what I (?:asked|requested|said)", "only-what-asked", 0.90, 120),
-    (r"stop (?:refactoring|changing|modifying|editing) (?:unrelated|other|surrounding)", "stop-unrelated", 0.90, 120),
-    (r"don't (?:over-engineer|add extra|be too|make unnecessary)", "dont-over-engineer", 0.85, 90),
-    (r"don't (?:refactor|reorganize|restructure) (?:unless|without)", "dont-refactor-unless", 0.85, 90),
+    (
+        r"only (?:change|modify|edit|touch) what I (?:asked|requested|said)",
+        "only-what-asked",
+        0.90,
+        120,
+    ),
+    (
+        r"stop (?:refactoring|changing|modifying|editing) (?:unrelated|other|surrounding)",
+        "stop-unrelated",
+        0.90,
+        120,
+    ),
+    (
+        r"don't (?:over-engineer|add extra|be too|make unnecessary)",
+        "dont-over-engineer",
+        0.85,
+        90,
+    ),
+    (
+        r"don't (?:refactor|reorganize|restructure) (?:unless|without)",
+        "dont-refactor-unless",
+        0.85,
+        90,
+    ),
     (r"leave .{1,30} (?:alone|unchanged|as is)", "leave-alone", 0.85, 90),
-    (r"don't (?:add|include) (?:comments|docstrings|type hints|annotations) (?:unless|to code)", "dont-add-annotations", 0.85, 90),
+    (
+        r"don't (?:add|include) (?:comments|docstrings|type hints|annotations) (?:unless|to code)",
+        "dont-add-annotations",
+        0.85,
+        90,
+    ),
     (r"(?:minimal|minimum|only necessary) changes", "minimal-changes", 0.80, 90),
+    (
+        r"\b(?:call me|address me as)\b",
+        "naming-preference",
+        0.90,
+        180,
+    ),
 ]
 
 # Structural patterns indicating FALSE POSITIVES (language-agnostic)
@@ -592,7 +762,13 @@ def detect_patterns(text: str) -> Tuple[Optional[str], str, float, str, int]:
         elif text_length > 150:
             confidence = max(0.55, confidence - 0.10)
 
-        return ("auto", " ".join(matched_corrections), confidence, "correction", decay_days)
+        return (
+            "auto",
+            " ".join(matched_corrections),
+            confidence,
+            "correction",
+            decay_days,
+        )
 
     return (None, "", 0.0, "correction", 90)
 
@@ -604,7 +780,7 @@ def create_queue_item(
     confidence: float,
     sentiment: str,
     decay_days: int,
-    project: Optional[str] = None
+    project: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a properly formatted queue item."""
     return {
@@ -623,7 +799,10 @@ def create_queue_item(
 # Session file utilities
 # =============================================================================
 
-def extract_user_messages(session_file: Path, corrections_only: bool = False) -> List[str]:
+
+def extract_user_messages(
+    session_file: Path, corrections_only: bool = False
+) -> List[str]:
     """
     Extract user messages from a Claude Code session file (JSONL format).
 
@@ -683,7 +862,9 @@ def extract_user_messages(session_file: Path, corrections_only: bool = False) ->
             r"not right|not correct|actually[,. ]|I meant|I said|I told you|"
             r"I already told|you should use|you need to use|use .+ not|not .+, use|remember:)"
         )
-        messages = [m for m in messages if re.search(correction_pattern, m, re.IGNORECASE)]
+        messages = [
+            m for m in messages if re.search(correction_pattern, m, re.IGNORECASE)
+        ]
 
     return messages
 
@@ -702,9 +883,9 @@ def should_include_message(text: str) -> bool:
 
     # Skip lines starting with certain patterns
     skip_patterns = [
-        r"^<",              # XML tags (<task-notification>, <system-reminder>, etc.)
-        r"^\[",             # Brackets
-        r"^\{",             # JSON
+        r"^<",  # XML tags (<task-notification>, <system-reminder>, etc.)
+        r"^\[",  # Brackets
+        r"^\{",  # JSON
         r"tool_result",
         r"tool_use_id",
         r"<command-",
@@ -712,8 +893,8 @@ def should_include_message(text: str) -> bool:
         r"<system-reminder>",
         r"This session is being continued",
         r"^Analysis:",
-        r"^\*\*",           # Bold text
-        r"^   -",           # Indented lists
+        r"^\*\*",  # Bold text
+        r"^   -",  # Indented lists
     ]
 
     for pattern in skip_patterns:
@@ -797,7 +978,7 @@ def extract_tool_rejections(session_file: Path) -> List[str]:
                     if "the user said:" in lower_content:
                         # Find the position case-insensitively
                         idx = lower_content.find("the user said:")
-                        after_marker = tool_content[idx + len("the user said:"):]
+                        after_marker = tool_content[idx + len("the user said:") :]
                         # Get the next line (bash uses getline)
                         lines = after_marker.strip().split("\n")
                         if lines and lines[0].strip():
@@ -823,47 +1004,62 @@ TOOL_ERROR_EXCLUDE_PATTERNS = [
     r"The user doesn't want to proceed",  # User rejections handled separately
     # Global Claude behavior issues - not project-specific
     r"unexpected EOF while looking for matching",  # Bash quoting
-    r"EISDIR|illegal operation on a directory",    # File vs dir confusion
-    r"syntax error.*eval",                          # Bash syntax errors
+    r"EISDIR|illegal operation on a directory",  # File vs dir confusion
+    r"syntax error.*eval",  # Bash syntax errors
 ]
 
 # PROJECT-SPECIFIC error patterns that reveal env/config/structure issues
 # Format: (error_type, regex_pattern, suggested_guideline_template)
 PROJECT_SPECIFIC_ERROR_PATTERNS = [
     # Connection/service errors - often reveal env/config issues
-    ("connection_refused",
-     r"Connection refused|ECONNREFUSED|connect ECONNREFUSED",
-     "Check .env for service URLs - don't assume localhost"),
-    ("env_undefined",
-     r"(\w+_URL|DATABASE_URL|API_KEY|SECRET).*undefined|not set|is not defined",
-     "Load .env file before accessing environment variables"),
+    (
+        "connection_refused",
+        r"Connection refused|ECONNREFUSED|connect ECONNREFUSED",
+        "Check .env for service URLs - don't assume localhost",
+    ),
+    (
+        "env_undefined",
+        r"(\w+_URL|DATABASE_URL|API_KEY|SECRET).*undefined|not set|is not defined",
+        "Load .env file before accessing environment variables",
+    ),
     # Database-specific errors
-    ("supabase_error",
-     r"supabase|Supabase|SUPABASE",
-     "Check SUPABASE_URL and SUPABASE_KEY in .env"),
-    ("postgres_error",
-     r"postgres|PostgreSQL|PGHOST|:5432|password authentication failed",
-     "Check DATABASE_URL in .env for PostgreSQL connection"),
-    ("redis_error",
-     r"redis|REDIS|:6379",
-     "Check REDIS_URL in .env for Redis connection"),
+    (
+        "supabase_error",
+        r"supabase|Supabase|SUPABASE",
+        "Check SUPABASE_URL and SUPABASE_KEY in .env",
+    ),
+    (
+        "postgres_error",
+        r"postgres|PostgreSQL|PGHOST|:5432|password authentication failed",
+        "Check DATABASE_URL in .env for PostgreSQL connection",
+    ),
+    (
+        "redis_error",
+        r"redis|REDIS|:6379",
+        "Check REDIS_URL in .env for Redis connection",
+    ),
     # Path/module errors - reveal project structure
-    ("module_not_found",
-     r"ModuleNotFoundError|Cannot find module|No module named",
-     "Check import paths - verify project structure"),
-    ("venv_not_found",
-     r"venv.*No such file|activate: No such file|\.venv.*not found",
-     "Check virtual environment location"),
+    (
+        "module_not_found",
+        r"ModuleNotFoundError|Cannot find module|No module named",
+        "Check import paths - verify project structure",
+    ),
+    (
+        "venv_not_found",
+        r"venv.*No such file|activate: No such file|\.venv.*not found",
+        "Check virtual environment location",
+    ),
     # Port/service conflicts
-    ("port_in_use",
-     r"address already in use|EADDRINUSE|port.*already.*use",
-     "Check if service is already running on this port"),
+    (
+        "port_in_use",
+        r"address already in use|EADDRINUSE|port.*already.*use",
+        "Check if service is already running on this port",
+    ),
 ]
 
 
 def extract_tool_errors(
-    session_file: Path,
-    project_specific_only: bool = True
+    session_file: Path, project_specific_only: bool = True
 ) -> List[Dict[str, Any]]:
     """
     Extract tool execution errors from session files.
@@ -945,13 +1141,15 @@ def extract_tool_errors(
                     if project_specific_only and error_type == "unknown":
                         continue
 
-                    errors.append({
-                        "error_type": error_type,
-                        "content": tool_content[:500],  # Truncate long errors
-                        "project": str(session_file.parent.name),
-                        "timestamp": entry.get("timestamp", ""),
-                        "suggested_guideline": suggested_guideline,
-                    })
+                    errors.append(
+                        {
+                            "error_type": error_type,
+                            "content": tool_content[:500],  # Truncate long errors
+                            "project": str(session_file.parent.name),
+                            "timestamp": entry.get("timestamp", ""),
+                            "suggested_guideline": suggested_guideline,
+                        }
+                    )
 
     except IOError:
         return []
@@ -960,8 +1158,7 @@ def extract_tool_errors(
 
 
 def aggregate_tool_errors(
-    errors: List[Dict[str, Any]],
-    min_occurrences: int = 2
+    errors: List[Dict[str, Any]], min_occurrences: int = 2
 ) -> List[Dict[str, Any]]:
     """
     Group errors by type and return those with multiple occurrences.
@@ -1006,14 +1203,16 @@ def aggregate_tool_errors(
         else:
             confidence = 0.70
 
-        aggregated.append({
-            "error_type": error_type,
-            "count": count,
-            "suggested_guideline": suggested_guideline,
-            "confidence": confidence,
-            "decay_days": 180,  # Tool error learnings decay slower
-            "sample_errors": [s["content"][:200] for s in samples],
-        })
+        aggregated.append(
+            {
+                "error_type": error_type,
+                "count": count,
+                "suggested_guideline": suggested_guideline,
+                "confidence": confidence,
+                "decay_days": 180,  # Tool error learnings decay slower
+                "sample_errors": [s["content"][:200] for s in samples],
+            }
+        )
 
     # Sort by count descending
     aggregated.sort(key=lambda x: x["count"], reverse=True)
