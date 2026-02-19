@@ -2,11 +2,11 @@
 """Compare regex vs semantic detection on real session data.
 
 This script runs both regex and semantic detection on user messages from
-Claude Code session files and generates a comparison report.
+OpenCode session files and generates a comparison report.
 
 Usage:
     python scripts/compare_detection.py [session_files...]
-    python scripts/compare_detection.py ~/.claude/projects/*/session*.jsonl
+    python scripts/compare_detection.py ~/.config/opencode/projects/*/session*.jsonl
     python scripts/compare_detection.py --project .  # Current project sessions
 
 Options:
@@ -16,6 +16,7 @@ Options:
     --verbose        Show all messages, not just differences
     --output FILE    Write report to file instead of stdout
 """
+
 import argparse
 import json
 import os
@@ -29,18 +30,19 @@ sys.path.insert(0, str(Path(__file__).parent))
 from lib.reflect_utils import detect_patterns, extract_user_messages
 from lib.semantic_detector import semantic_analyze
 
+
 # Colors for terminal output
 class Colors:
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    BOLD = '\033[1m'
-    END = '\033[0m'
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    BOLD = "\033[1m"
+    END = "\033[0m"
 
     @classmethod
     def disable(cls):
-        cls.GREEN = cls.RED = cls.YELLOW = cls.BLUE = cls.BOLD = cls.END = ''
+        cls.GREEN = cls.RED = cls.YELLOW = cls.BLUE = cls.BOLD = cls.END = ""
 
 
 def find_project_sessions(project_path: str) -> List[Path]:
@@ -48,18 +50,18 @@ def find_project_sessions(project_path: str) -> List[Path]:
     project_path = os.path.abspath(project_path)
     project_name = os.path.basename(project_path)
 
-    claude_projects = Path.home() / ".claude" / "projects"
-    if not claude_projects.exists():
+    opencode_projects = Path.home() / ".config" / "opencode" / "projects"
+    if not opencode_projects.exists():
         return []
 
     # Try to find matching project folder
-    for folder in claude_projects.iterdir():
+    for folder in opencode_projects.iterdir():
         if project_name.lower() in folder.name.lower():
             return list(folder.glob("*.jsonl"))
 
     # Try with hyphens instead of underscores
-    project_name_hyphen = project_name.replace('_', '-')
-    for folder in claude_projects.iterdir():
+    project_name_hyphen = project_name.replace("_", "-")
+    for folder in opencode_projects.iterdir():
         if project_name_hyphen.lower() in folder.name.lower():
             return list(folder.glob("*.jsonl"))
 
@@ -106,12 +108,12 @@ def analyze_message(text: str, use_semantic: bool = True) -> Dict[str, Any]:
 def compare_results(results: List[Dict[str, Any]]) -> Dict[str, List[Dict]]:
     """Compare regex vs semantic results and categorize."""
     categories = {
-        "both_learning": [],      # Both agree it's a learning
+        "both_learning": [],  # Both agree it's a learning
         "both_not_learning": [],  # Both agree it's not a learning
-        "regex_only": [],         # Regex says learning, semantic disagrees
-        "semantic_only": [],      # Semantic says learning, regex missed
-        "confidence_diff": [],    # Both agree but different confidence
-        "semantic_error": [],     # Semantic analysis failed
+        "regex_only": [],  # Regex says learning, semantic disagrees
+        "semantic_only": [],  # Semantic says learning, regex missed
+        "confidence_diff": [],  # Both agree but different confidence
+        "semantic_error": [],  # Semantic analysis failed
     }
 
     for r in results:
@@ -156,7 +158,9 @@ def format_result(r: Dict[str, Any], verbose: bool = False) -> str:
     lines = [f'  "{text}"']
 
     if regex.get("is_learning"):
-        lines.append(f"    {Colors.BLUE}Regex:{Colors.END} ✓ type={regex['type']} conf={regex['confidence']:.2f} patterns={regex.get('patterns', '')}")
+        lines.append(
+            f"    {Colors.BLUE}Regex:{Colors.END} ✓ type={regex['type']} conf={regex['confidence']:.2f} patterns={regex.get('patterns', '')}"
+        )
     else:
         lines.append(f"    {Colors.BLUE}Regex:{Colors.END} ✗ (no pattern match)")
 
@@ -165,16 +169,20 @@ def format_result(r: Dict[str, Any], verbose: bool = False) -> str:
             extracted = semantic.get("extracted_learning", "")
             if extracted and len(extracted) > 50:
                 extracted = extracted[:47] + "..."
-            lines.append(f"    {Colors.YELLOW}Semantic:{Colors.END} ✓ type={semantic['type']} conf={semantic['confidence']:.2f}")
+            lines.append(
+                f"    {Colors.YELLOW}Semantic:{Colors.END} ✓ type={semantic['type']} conf={semantic['confidence']:.2f}"
+            )
             if extracted:
-                lines.append(f"             → \"{extracted}\"")
+                lines.append(f'             → "{extracted}"')
         else:
             reason = semantic.get("reasoning", "")
             if len(reason) > 60:
                 reason = reason[:57] + "..."
             lines.append(f"    {Colors.YELLOW}Semantic:{Colors.END} ✗ ({reason})")
     elif semantic:
-        lines.append(f"    {Colors.YELLOW}Semantic:{Colors.END} ⚠ {semantic.get('error', 'unavailable')}")
+        lines.append(
+            f"    {Colors.YELLOW}Semantic:{Colors.END} ⚠ {semantic.get('error', 'unavailable')}"
+        )
 
     return "\n".join(lines)
 
@@ -198,12 +206,36 @@ def generate_report(categories: Dict[str, List], verbose: bool = False) -> str:
     lines.append("├─────────────────────────┼───────┼────────────────────────────────┤")
 
     rows = [
-        ("Both agree: learning", len(categories["both_learning"]), "Regex + semantic both detect"),
-        ("Both agree: not learning", len(categories["both_not_learning"]), "Neither detects a learning"),
-        ("Regex only (potential FP)", len(categories["regex_only"]), "Regex detected, semantic rejected"),
-        ("Semantic only (new!)", len(categories["semantic_only"]), "Semantic found, regex missed"),
-        ("Confidence differs", len(categories["confidence_diff"]), "Both detect, scores differ >0.2"),
-        ("Semantic unavailable", len(categories["semantic_error"]), "Claude CLI error/timeout"),
+        (
+            "Both agree: learning",
+            len(categories["both_learning"]),
+            "Regex + semantic both detect",
+        ),
+        (
+            "Both agree: not learning",
+            len(categories["both_not_learning"]),
+            "Neither detects a learning",
+        ),
+        (
+            "Regex only (potential FP)",
+            len(categories["regex_only"]),
+            "Regex detected, semantic rejected",
+        ),
+        (
+            "Semantic only (new!)",
+            len(categories["semantic_only"]),
+            "Semantic found, regex missed",
+        ),
+        (
+            "Confidence differs",
+            len(categories["confidence_diff"]),
+            "Both detect, scores differ >0.2",
+        ),
+        (
+            "Semantic unavailable",
+            len(categories["semantic_error"]),
+            "semantic CLI error/timeout",
+        ),
     ]
 
     for name, count, desc in rows:
@@ -216,7 +248,9 @@ def generate_report(categories: Dict[str, List], verbose: bool = False) -> str:
 
     # Semantic-only (new detections regex missed)
     if categories["semantic_only"]:
-        lines.append(f"{Colors.GREEN}{Colors.BOLD}SEMANTIC-ONLY DETECTIONS ({len(categories['semantic_only'])}){Colors.END}")
+        lines.append(
+            f"{Colors.GREEN}{Colors.BOLD}SEMANTIC-ONLY DETECTIONS ({len(categories['semantic_only'])}){Colors.END}"
+        )
         lines.append("These are corrections that regex missed but semantic caught:")
         lines.append("")
         for r in categories["semantic_only"][:10]:
@@ -228,7 +262,9 @@ def generate_report(categories: Dict[str, List], verbose: bool = False) -> str:
 
     # Regex-only (potential false positives)
     if categories["regex_only"]:
-        lines.append(f"{Colors.RED}{Colors.BOLD}REGEX-ONLY DETECTIONS ({len(categories['regex_only'])}){Colors.END}")
+        lines.append(
+            f"{Colors.RED}{Colors.BOLD}REGEX-ONLY DETECTIONS ({len(categories['regex_only'])}){Colors.END}"
+        )
         lines.append("These may be false positives that semantic correctly rejected:")
         lines.append("")
         for r in categories["regex_only"][:10]:
@@ -240,8 +276,12 @@ def generate_report(categories: Dict[str, List], verbose: bool = False) -> str:
 
     # Confidence differences
     if categories["confidence_diff"]:
-        lines.append(f"{Colors.YELLOW}{Colors.BOLD}CONFIDENCE DIFFERENCES ({len(categories['confidence_diff'])}){Colors.END}")
-        lines.append("Both detected as learning, but confidence scores differ significantly:")
+        lines.append(
+            f"{Colors.YELLOW}{Colors.BOLD}CONFIDENCE DIFFERENCES ({len(categories['confidence_diff'])}){Colors.END}"
+        )
+        lines.append(
+            "Both detected as learning, but confidence scores differ significantly:"
+        )
         lines.append("")
         for r in categories["confidence_diff"][:5]:
             lines.append(format_result(r, verbose))
@@ -250,7 +290,9 @@ def generate_report(categories: Dict[str, List], verbose: bool = False) -> str:
     # Verbose: show all categories
     if verbose:
         if categories["both_learning"]:
-            lines.append(f"{Colors.BOLD}BOTH AGREE: LEARNING ({len(categories['both_learning'])}){Colors.END}")
+            lines.append(
+                f"{Colors.BOLD}BOTH AGREE: LEARNING ({len(categories['both_learning'])}){Colors.END}"
+            )
             for r in categories["both_learning"][:5]:
                 lines.append(format_result(r, verbose))
                 lines.append("")
@@ -267,9 +309,13 @@ def generate_report(categories: Dict[str, List], verbose: bool = False) -> str:
     regex_fp = len(categories["regex_only"])
 
     if semantic_found > 0:
-        lines.append(f"  {Colors.GREEN}✓ Semantic found {semantic_found} learnings that regex missed{Colors.END}")
+        lines.append(
+            f"  {Colors.GREEN}✓ Semantic found {semantic_found} learnings that regex missed{Colors.END}"
+        )
     if regex_fp > 0:
-        lines.append(f"  {Colors.RED}✗ Semantic rejected {regex_fp} potential false positives from regex{Colors.END}")
+        lines.append(
+            f"  {Colors.RED}✗ Semantic rejected {regex_fp} potential false positives from regex{Colors.END}"
+        )
     if semantic_found == 0 and regex_fp == 0:
         lines.append("  ≈ Regex and semantic detection agree on most cases")
 
@@ -284,8 +330,12 @@ def main():
     )
     parser.add_argument("files", nargs="*", help="Session files to analyze")
     parser.add_argument("--project", help="Find sessions for a project path")
-    parser.add_argument("--limit", type=int, default=100, help="Max messages to analyze")
-    parser.add_argument("--no-semantic", action="store_true", help="Skip semantic analysis")
+    parser.add_argument(
+        "--limit", type=int, default=100, help="Max messages to analyze"
+    )
+    parser.add_argument(
+        "--no-semantic", action="store_true", help="Skip semantic analysis"
+    )
     parser.add_argument("--verbose", action="store_true", help="Show all categories")
     parser.add_argument("--output", help="Write report to file")
     parser.add_argument("--no-color", action="store_true", help="Disable colors")
@@ -311,7 +361,9 @@ def main():
 
     if not session_files:
         print("No session files specified. Usage:")
-        print("  python scripts/compare_detection.py ~/.claude/projects/*/*.jsonl")
+        print(
+            "  python scripts/compare_detection.py ~/.config/opencode/projects/*/*.jsonl"
+        )
         print("  python scripts/compare_detection.py --project .")
         sys.exit(1)
 
@@ -328,7 +380,7 @@ def main():
     # Limit messages if needed
     if len(all_messages) > args.limit:
         print(f"Limiting to {args.limit} messages")
-        all_messages = all_messages[:args.limit]
+        all_messages = all_messages[: args.limit]
 
     # Analyze each message
     print("Analyzing messages...")
@@ -351,7 +403,7 @@ def main():
         learnings = [r for r in results if r["regex"].get("is_learning")]
         report = f"\nRegex-only analysis: {len(learnings)} learnings detected out of {len(results)} messages\n"
         for r in learnings[:20]:
-            report += f"\n  \"{r['text'][:60]}...\" → {r['regex']['patterns']}"
+            report += f'\n  "{r["text"][:60]}..." → {r["regex"]["patterns"]}'
 
     # Output
     if args.output:

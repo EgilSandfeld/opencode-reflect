@@ -1,1 +1,1 @@
-"""Claude-reflect shared utilities."""
+"""opencode-reflect shared utilities."""
