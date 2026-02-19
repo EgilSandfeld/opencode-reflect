@@ -2,9 +2,10 @@
 """Show pending learnings reminder at session start. SessionStart hook.
 
 Cross-platform compatible (Windows, macOS, Linux).
-This script is called by Claude Code's SessionStart hook to remind
+This script is called by OpenCode's SessionStart hook to remind
 user of pending learnings that need review.
 """
+
 import sys
 import os
 
@@ -17,15 +18,19 @@ from lib.reflect_utils import load_queue, get_cleanup_period_days
 def main() -> int:
     """Main entry point."""
     # Check if reminder is disabled via environment variable
-    if os.environ.get("CLAUDE_REFLECT_REMINDER", "true").lower() == "false":
+    if os.environ.get("OPENCODE_REFLECT_REMINDER", "true").lower() == "false":
         return 0
 
     # Warn if cleanupPeriodDays is not configured (self-resolving: stops once user sets it)
     cleanup_days = get_cleanup_period_days()
     if cleanup_days is None or cleanup_days <= 30:
-        print(f"\n⚠️  Claude Code deletes sessions after {cleanup_days or 30} days.")
-        print(f"   claude-reflect needs session history for /reflect and /reflect-skills.")
-        print(f"   Extend retention: add {{\"cleanupPeriodDays\": 99999}} to ~/.claude/settings.json")
+        print(f"\n⚠️  OpenCode deletes sessions after {cleanup_days or 30} days.")
+        print(
+            f"   opencode-reflect needs session history for /reflect and /reflect-skills."
+        )
+        print(
+            f'   Extend retention: add {{"cleanupPeriodDays": 99999}} to ~/.config/opencode/settings.json'
+        )
 
     items = load_queue()
 
@@ -33,9 +38,9 @@ def main() -> int:
         return 0
 
     count = len(items)
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"📚 {count} pending learning(s) to review")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
     # Show up to 5 items
     for i, item in enumerate(items[:5], 1):
@@ -50,7 +55,7 @@ def main() -> int:
         print(f"  ... and {count - 5} more")
 
     print(f"\n💡 Run /reflect to review and apply")
-    print(f"{'='*50}\n")
+    print(f"{'=' * 50}\n")
 
     return 0
 

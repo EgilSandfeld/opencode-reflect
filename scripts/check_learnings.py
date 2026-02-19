@@ -2,7 +2,7 @@
 """Backup queue before context compaction. PreCompact hook.
 
 Cross-platform compatible (Windows, macOS, Linux).
-This script is called by Claude Code's PreCompact hook to back up
+This script is called by OpenCode's PreCompact hook to back up
 the learnings queue before context is compacted.
 """
 import sys

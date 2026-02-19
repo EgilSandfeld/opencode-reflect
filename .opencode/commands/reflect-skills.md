@@ -5,8 +5,7 @@ description: Discover reusable OpenCode command/skill candidates from sessions
 Analyze recent session patterns and propose new reusable commands.
 
 Sources:
-- Prefer OpenCode session/event history if available.
-- Fallback to Claude history under `~/.claude/projects/` if needed.
+- Use OpenCode session/event history under `~/.config/opencode/projects/`.
 
 Workflow:
 1. Gather recent user requests and corrections (default last 14 days unless user specifies).

@@ -6,7 +6,6 @@ Show queued learnings in a compact format.
 
 Use this order:
 1. Read `~/.config/opencode/learnings-queue.json`
-2. If missing/empty, read `~/.claude/learnings-queue.json`
 
 For each item show:
 - confidence

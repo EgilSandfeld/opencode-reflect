@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Semantic learning detection using Claude Code CLI.
+"""Semantic learning detection using OpenCode CLI.
 
-Uses `claude -p` (print mode) to semantically analyze user messages
+Uses `opencode run` to semantically analyze user messages
 and determine if they contain reusable learnings.
 """
+
 import json
 import subprocess
 import sys
 from typing import Optional, Dict, Any
 
-# Default timeout for Claude CLI calls (seconds)
+# Default timeout for semantic CLI calls (seconds)
 DEFAULT_TIMEOUT = 30
 
 # Default model for semantic analysis — uses a cost-effective model
@@ -29,7 +30,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "type": "correction" or "positive" or "explicit" or null,
   "confidence": 0.0 to 1.0,
   "reasoning": "brief 1-sentence explanation",
-  "extracted_learning": "concise actionable statement to add to CLAUDE.md, or null if not a learning"
+  "extracted_learning": "concise actionable statement to add to AGENTS.md, or null if not a learning"
 }}
 
 Guidelines:
@@ -44,16 +45,14 @@ Guidelines:
 
 
 def semantic_analyze(
-    text: str,
-    timeout: int = DEFAULT_TIMEOUT,
-    model: Optional[str] = None
+    text: str, timeout: int = DEFAULT_TIMEOUT, model: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Analyze text using Claude to determine if it's a learning.
+    Analyze text using semantic analysis to determine if it's a learning.
 
     Args:
         text: The user message to analyze
-        timeout: Timeout in seconds for the Claude CLI call
+        timeout: Timeout in seconds for the semantic CLI call
         model: Optional model override (e.g., "sonnet", "haiku")
 
     Returns:
@@ -74,7 +73,7 @@ def semantic_analyze(
 
     # Build command — use DEFAULT_MODEL if no explicit model specified
     effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
+    cmd = ["opencode", "run", "--format", "json"]
     if effective_model:
         cmd.extend(["--model", effective_model])
 
@@ -89,7 +88,7 @@ def semantic_analyze(
         )
 
         if result.returncode != 0:
-            # Claude CLI failed
+            # semantic CLI failed
             return None
 
         # Parse the JSON output
@@ -97,7 +96,7 @@ def semantic_analyze(
         if not output:
             return None
 
-        # Claude -p --output-format json wraps the response
+        # The semantic CLI JSON wrapper contains the response
         # Try to extract the actual JSON from the response
         try:
             response = json.loads(output)
@@ -118,7 +117,7 @@ def semantic_analyze(
     except subprocess.TimeoutExpired:
         return None
     except FileNotFoundError:
-        # Claude CLI not installed
+        # semantic CLI not installed
         return None
     except Exception:
         return None
@@ -127,27 +126,27 @@ def semantic_analyze(
 def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Try to extract JSON from text that may have surrounding content."""
     # Find JSON object boundaries
-    start = text.find('{')
+    start = text.find("{")
     if start == -1:
         return None
 
     # Find matching closing brace
     depth = 0
     for i, char in enumerate(text[start:], start):
-        if char == '{':
+        if char == "{":
             depth += 1
-        elif char == '}':
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(text[start:i+1])
+                    return json.loads(text[start : i + 1])
                 except json.JSONDecodeError:
                     return None
     return None
 
 
 def _validate_response(content: Any) -> Optional[Dict[str, Any]]:
-    """Validate and normalize the response from Claude."""
+    """Validate and normalize the response from semantic analysis."""
     if not isinstance(content, dict):
         return None
 
@@ -179,14 +178,14 @@ def _validate_response(content: Any) -> Optional[Dict[str, Any]]:
         "type": learning_type if is_learning else None,
         "confidence": confidence,
         "reasoning": str(content.get("reasoning", "")),
-        "extracted_learning": content.get("extracted_learning") if is_learning else None,
+        "extracted_learning": content.get("extracted_learning")
+        if is_learning
+        else None,
     }
 
 
 def validate_queue_items(
-    items: list,
-    timeout: int = DEFAULT_TIMEOUT,
-    model: Optional[str] = None
+    items: list, timeout: int = DEFAULT_TIMEOUT, model: Optional[str] = None
 ) -> list:
     """
     Validate a list of queue items using semantic analysis.
@@ -243,8 +242,8 @@ def validate_queue_items(
 # Tool error validation
 # =============================================================================
 
-# Prompt for converting tool errors into CLAUDE.md guidelines
-ERROR_TO_GUIDELINE_PROMPT = """You are analyzing repeated tool execution errors to extract CLAUDE.md guidelines.
+# Prompt for converting tool errors into AGENTS.md guidelines
+ERROR_TO_GUIDELINE_PROMPT = """You are analyzing repeated tool execution errors to extract AGENTS.md guidelines.
 
 Error type: {error_type}
 Sample error message: "{sample_error}"
@@ -252,7 +251,7 @@ Occurrences: {count}
 Suggested guideline: "{suggested_guideline}"
 
 Analyze this error pattern and determine:
-1. Is this a project-specific issue that should go in CLAUDE.md?
+1. Is this a project-specific issue that should go in AGENTS.md?
 2. Should the guideline be refined or improved?
 
 Respond ONLY with valid JSON (no markdown, no explanation):
@@ -265,7 +264,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 
 Guidelines for classification:
 - is_learnable=true: Error reveals project-specific context (env vars, paths, services)
-- is_learnable=false: Error is generic Claude behavior (bash syntax, file handling)
+- is_learnable=false: Error is generic assistant behavior (bash syntax, file handling)
 - refined_guideline: Should mention specific services/paths if detected in error
 - confidence: Higher if clearly project-specific (0.7+)"""
 
@@ -276,10 +275,10 @@ def validate_tool_error(
     count: int,
     suggested_guideline: str,
     timeout: int = DEFAULT_TIMEOUT,
-    model: Optional[str] = None
+    model: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Validate a tool error pattern and refine its guideline using Claude.
+    Validate a tool error pattern and refine its guideline using semantic analysis.
 
     Args:
         error_type: The categorized error type
@@ -302,12 +301,12 @@ def validate_tool_error(
         error_type=error_type,
         sample_error=sample_error[:300].replace('"', '\\"'),
         count=count,
-        suggested_guideline=suggested_guideline or "No suggestion"
+        suggested_guideline=suggested_guideline or "No suggestion",
     )
 
     # Build command — use DEFAULT_MODEL if no explicit model specified
     effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
+    cmd = ["opencode", "run", "--format", "json"]
     if effective_model:
         cmd.extend(["--model", effective_model])
 
@@ -370,9 +369,7 @@ def validate_tool_error(
 
 
 def validate_tool_errors(
-    aggregated_errors: list,
-    timeout: int = DEFAULT_TIMEOUT,
-    model: Optional[str] = None
+    aggregated_errors: list, timeout: int = DEFAULT_TIMEOUT, model: Optional[str] = None
 ) -> list:
     """
     Validate a list of aggregated tool errors using semantic analysis.
@@ -401,7 +398,7 @@ def validate_tool_errors(
             count=count,
             suggested_guideline=suggested,
             timeout=timeout,
-            model=model
+            model=model,
         )
 
         if result is None:
@@ -429,8 +426,8 @@ def validate_tool_errors(
 # Contradiction detection
 # =============================================================================
 
-# Prompt for detecting contradictions in CLAUDE.md entries
-CONTRADICTION_PROMPT = """Analyze these CLAUDE.md entries for contradictions.
+# Prompt for detecting contradictions in AGENTS.md entries
+CONTRADICTION_PROMPT = """Analyze these AGENTS.md entries for contradictions.
 
 Entries:
 {entries}
@@ -459,16 +456,14 @@ Rules:
 
 
 def detect_contradictions(
-    entries: list,
-    timeout: int = DEFAULT_TIMEOUT,
-    model: Optional[str] = None
+    entries: list, timeout: int = DEFAULT_TIMEOUT, model: Optional[str] = None
 ) -> list:
     """
-    Find semantically contradicting entries in a list of CLAUDE.md entries.
+    Find semantically contradicting entries in a list of AGENTS.md entries.
 
     Args:
-        entries: List of entry strings (bullet points from CLAUDE.md)
-        timeout: Timeout in seconds for the Claude CLI call
+        entries: List of entry strings (bullet points from AGENTS.md)
+        timeout: Timeout in seconds for the semantic CLI call
         model: Optional model override (e.g., "sonnet", "haiku")
 
     Returns:
@@ -485,7 +480,7 @@ def detect_contradictions(
 
     # Build command — use DEFAULT_MODEL if no explicit model specified
     effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
+    cmd = ["opencode", "run", "--format", "json"]
     if effective_model:
         cmd.extend(["--model", effective_model])
 
@@ -530,11 +525,13 @@ def detect_contradictions(
         valid = []
         for c in contradictions:
             if isinstance(c, dict) and "entry1" in c and "entry2" in c:
-                valid.append({
-                    "entry1": str(c.get("entry1", "")),
-                    "entry2": str(c.get("entry2", "")),
-                    "conflict": str(c.get("conflict", "Conflicting instructions")),
-                })
+                valid.append(
+                    {
+                        "entry1": str(c.get("entry1", "")),
+                        "entry2": str(c.get("entry2", "")),
+                        "conflict": str(c.get("conflict", "Conflicting instructions")),
+                    }
+                )
 
         return valid
 

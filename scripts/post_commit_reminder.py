@@ -2,7 +2,7 @@
 """Remind about /reflect after git commits. PostToolUse hook for Bash.
 
 Cross-platform compatible (Windows, macOS, Linux).
-This script is called by Claude Code's PostToolUse hook after Bash commands.
+This script is called by OpenCode's PostToolUse hook after Bash commands.
 It detects git commits and reminds the user to run /reflect.
 """
 import sys

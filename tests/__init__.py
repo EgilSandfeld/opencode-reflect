@@ -1,1 +1,1 @@
-"""Tests for claude-reflect Python scripts."""
+"""Tests for opencode-reflect Python scripts."""

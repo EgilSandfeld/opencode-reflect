@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract user messages from Claude Code session files.
+"""Extract user messages from OpenCode session files.
 
 Cross-platform compatible (Windows, macOS, Linux).
 Usage: python extract_session_learnings.py <session-file> [--corrections-only]

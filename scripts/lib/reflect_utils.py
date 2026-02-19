@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared utilities for claude-reflect hooks and scripts.
+"""Shared utilities for opencode-reflect hooks and scripts.
 
 Cross-platform compatible (Windows, macOS, Linux).
 """
@@ -7,7 +7,6 @@ Cross-platform compatible (Windows, macOS, Linux).
 import json
 import re
 import os
-import warnings
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
@@ -16,24 +15,6 @@ from typing import List, Dict, Any, Optional, Tuple
 # Path utilities
 # =============================================================================
 
-# Legacy alias deprecation policy
-# Remove legacy symbols no earlier than v1.0.0.
-LEGACY_ALIAS_REMOVAL_VERSION = "1.0.0"
-LEGACY_ALIAS_REMOVAL_DATE = "2026-12-31"
-
-
-def _warn_legacy_alias(old_name: str, new_name: str) -> None:
-    """Emit a hard deprecation warning for legacy alias calls."""
-    warnings.warn(
-        (
-            f"{old_name}() is deprecated and will be removed in "
-            f"v{LEGACY_ALIAS_REMOVAL_VERSION} (target date: {LEGACY_ALIAS_REMOVAL_DATE}). "
-            f"Use {new_name}() instead."
-        ),
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
 
 def get_runtime() -> str:
     """Detect runtime platform for storage and config paths.
@@ -41,10 +22,10 @@ def get_runtime() -> str:
     Priority:
     1. REFLECT_RUNTIME env var (explicit override)
     2. OpenCode-specific env hints
-    3. Claude Code (default, backwards compatible)
+    3. OpenCode (default)
     """
     explicit = os.environ.get("REFLECT_RUNTIME", "").strip().lower()
-    if explicit in {"opencode", "claude"}:
+    if explicit == "opencode":
         return explicit
 
     opencode_hints = {
@@ -56,18 +37,15 @@ def get_runtime() -> str:
     if any(k in os.environ for k in opencode_hints):
         return "opencode"
 
-    return "claude"
+    return "opencode"
 
 
 def get_platform_dir() -> Path:
     """Get runtime config directory.
 
-    - Claude Code: ~/.claude
     - OpenCode: ~/.config/opencode
     """
-    if get_runtime() == "opencode":
-        return Path.home() / ".config" / "opencode"
-    return Path.home() / ".claude"
+    return Path.home() / ".config" / "opencode"
 
 
 def get_queue_path() -> Path:
@@ -85,19 +63,8 @@ def get_memory_config_dir() -> Path:
     return get_platform_dir()
 
 
-def get_claude_dir() -> Path:
-    """Deprecated alias for get_memory_config_dir().
-
-    DEPRECATION:
-    - Warns on call
-    - Planned removal in v1.0.0
-    """
-    _warn_legacy_alias("get_claude_dir", "get_memory_config_dir")
-    return get_memory_config_dir()
-
-
 def get_cleanup_period_days() -> Optional[int]:
-    """Get cleanupPeriodDays from ~/.claude/settings.json. Returns None if not set."""
+    """Get cleanupPeriodDays from ~/.config/opencode/settings.json."""
     settings_path = get_memory_config_dir() / "settings.json"
     if not settings_path.exists():
         return None
@@ -108,7 +75,7 @@ def get_cleanup_period_days() -> Optional[int]:
         return None
 
 
-# Directories to exclude when searching for CLAUDE.md files
+# Directories to exclude when searching for memory files
 EXCLUDED_DIRS = {
     "node_modules",
     ".git",
@@ -137,7 +104,7 @@ EXCLUDED_DIRS = {
 
 
 def _parse_rule_frontmatter(filepath: Path) -> Optional[Dict[str, Any]]:
-    """Parse YAML-like frontmatter from a .claude/rules/*.md file.
+    """Parse YAML-like frontmatter from a .opencode/rules/*.md file.
 
     Extracts 'paths:' list without requiring PyYAML. Frontmatter is delimited
     by '---' lines at the start of the file.
@@ -206,68 +173,36 @@ def find_memory_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
 
     Returns:
         List of dicts with {path, relative_path, type, ...} for each file found.
-        Types: 'global', 'root', 'local', 'subdirectory', 'rule', 'user-rule'.
+        Types: 'global', 'root', 'rule', 'user-rule'.
         Rule files include a 'frontmatter' field with parsed YAML frontmatter.
     """
     root = Path(root_dir) if root_dir else Path.cwd()
     results = []
 
-    # Always include global CLAUDE.md
-    global_claude = get_memory_config_dir() / "CLAUDE.md"
-    if global_claude.exists():
+    # Always include global AGENTS.md
+    global_agents = get_memory_config_dir() / "AGENTS.md"
+    if global_agents.exists():
         results.append(
             {
-                "path": str(global_claude),
-                "relative_path": "~/.claude/CLAUDE.md",
+                "path": str(global_agents),
+                "relative_path": "~/.config/opencode/AGENTS.md",
                 "type": "global",
             }
         )
 
-    # Check root CLAUDE.md
-    root_claude = root / "CLAUDE.md"
-    if root_claude.exists():
+    # Check root AGENTS.md
+    root_agents = root / "AGENTS.md"
+    if root_agents.exists():
         results.append(
             {
-                "path": str(root_claude),
-                "relative_path": "./CLAUDE.md",
+                "path": str(root_agents),
+                "relative_path": "./AGENTS.md",
                 "type": "root",
             }
         )
 
-    # Check CLAUDE.local.md (personal, gitignored)
-    local_claude = root / "CLAUDE.local.md"
-    if local_claude.exists():
-        results.append(
-            {
-                "path": str(local_claude),
-                "relative_path": "./CLAUDE.local.md",
-                "type": "local",
-            }
-        )
-
-    # Search for CLAUDE.md in subdirectories
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Skip excluded directories
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS]
-
-        # Skip root (already handled)
-        if Path(dirpath) == root:
-            continue
-
-        if "CLAUDE.md" in filenames:
-            full_path = Path(dirpath) / "CLAUDE.md"
-            rel_path = full_path.relative_to(root)
-            # Use as_posix() for consistent forward slashes on all platforms
-            results.append(
-                {
-                    "path": str(full_path),
-                    "relative_path": f"./{rel_path.as_posix()}",
-                    "type": "subdirectory",
-                }
-            )
-
-    # Discover project rule files: .claude/rules/*.md
-    project_rules_dir = root / ".claude" / "rules"
+    # Discover project rule files: .opencode/rules/*.md
+    project_rules_dir = root / ".opencode" / "rules"
     if project_rules_dir.is_dir():
         for rule_file in sorted(project_rules_dir.glob("*.md")):
             frontmatter = _parse_rule_frontmatter(rule_file)
@@ -281,7 +216,7 @@ def find_memory_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
                 }
             )
 
-    # Discover user-level rule files: ~/.claude/rules/*.md
+    # Discover user-level rule files: ~/.config/opencode/rules/*.md
     user_rules_dir = get_memory_config_dir() / "rules"
     if user_rules_dir.is_dir():
         for rule_file in sorted(user_rules_dir.glob("*.md")):
@@ -289,24 +224,13 @@ def find_memory_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
             results.append(
                 {
                     "path": str(rule_file),
-                    "relative_path": f"~/.claude/rules/{rule_file.name}",
+                    "relative_path": f"~/.config/opencode/rules/{rule_file.name}",
                     "type": "user-rule",
                     "frontmatter": frontmatter,
                 }
             )
 
     return results
-
-
-def find_claude_files(root_dir: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Deprecated alias for find_memory_files().
-
-    DEPRECATION:
-    - Warns on call
-    - Planned removal in v1.0.0
-    """
-    _warn_legacy_alias("find_claude_files", "find_memory_files")
-    return find_memory_files(root_dir)
 
 
 def suggest_memory_file(
@@ -317,8 +241,8 @@ def suggest_memory_file(
     """
     Suggest which memory file a learning should go to.
 
-    This is a hint for Claude to use when reasoning about placement.
-    Returns the relative_path of the suggested file, or None to let Claude decide.
+    This is a hint for the assistant to use when reasoning about placement.
+    Returns the relative_path of the suggested file, or None to let the assistant decide.
 
     Args:
         learning: The learning text.
@@ -327,17 +251,17 @@ def suggest_memory_file(
     """
     learning_lower = learning.lower()
 
-    # Guardrails → .claude/rules/guardrails.md
+    # Guardrails -> .opencode/rules/guardrails.md
     if learning_type == "guardrail":
         # Check if a guardrails rule file already exists
         for cf in memory_files:
             if cf["type"] == "rule" and "guardrail" in Path(cf["path"]).stem.lower():
                 return cf["relative_path"]
         # Suggest creating one
-        return "./.claude/rules/guardrails.md"
+        return "./.opencode/rules/guardrails.md"
 
-    # Model indicators → existing model-preferences rule or global CLAUDE.md
-    model_indicators = ["gpt-", "claude-", "gemini-", "o3", "o4"]
+    # Model indicators -> existing model-preferences rule or global AGENTS.md
+    model_indicators = ["gpt-", "gemini-", "o3", "o4"]
     if any(ind in learning_lower for ind in model_indicators):
         for cf in memory_files:
             if (
@@ -345,12 +269,12 @@ def suggest_memory_file(
                 and "model" in Path(cf["path"]).stem.lower()
             ):
                 return cf["relative_path"]
-        return "~/.claude/CLAUDE.md"
+        return "~/.config/opencode/AGENTS.md"
 
-    # Global behavioral (always/never/prefer) → global CLAUDE.md
+    # Global behavioral (always/never/prefer) -> global AGENTS.md
     global_behavioral = ["always ", "never ", "prefer "]
     if any(ind in learning_lower for ind in global_behavioral):
-        return "~/.claude/CLAUDE.md"
+        return "~/.config/opencode/AGENTS.md"
 
     # Path-scoped rule match: learning mentions a directory covered by a rule's paths
     for cf in memory_files:
@@ -361,31 +285,8 @@ def suggest_memory_file(
                     if p.lower().rstrip("/") in learning_lower:
                         return cf["relative_path"]
 
-    # Check if learning mentions a specific subdirectory
-    for cf in memory_files:
-        if cf["type"] == "subdirectory":
-            # Extract directory name from path
-            dir_name = Path(cf["relative_path"]).parent.name.lower()
-            if dir_name in learning_lower:
-                return cf["relative_path"]
-
-    # Default: let Claude decide (return None)
+    # Default: let the assistant decide (return None)
     return None
-
-
-def suggest_claude_file(
-    learning: str,
-    claude_files: List[Dict[str, Any]],
-    learning_type: Optional[str] = None,
-) -> Optional[str]:
-    """Deprecated alias for suggest_memory_file().
-
-    DEPRECATION:
-    - Warns on call
-    - Planned removal in v1.0.0
-    """
-    _warn_legacy_alias("suggest_claude_file", "suggest_memory_file")
-    return suggest_memory_file(learning, claude_files, learning_type)
 
 
 # =============================================================================
@@ -394,7 +295,7 @@ def suggest_claude_file(
 
 
 def get_project_folder_name(project_dir: Optional[str] = None) -> str:
-    """Encode a project directory path using Claude Code's folder naming convention.
+    """Encode a project directory path using OpenCode's folder naming convention.
 
     /Users/bob/myapp → -Users-bob-myapp
     """
@@ -411,7 +312,7 @@ def get_project_folder_name(project_dir: Optional[str] = None) -> str:
 def get_auto_memory_path(project_dir: Optional[str] = None) -> Path:
     """Get the auto memory directory path for a project.
 
-    Returns ~/.claude/projects/<encoded>/memory/
+    Returns ~/.config/opencode/projects/<encoded>/memory/
     """
     folder_name = get_project_folder_name(project_dir)
     return get_memory_config_dir() / "projects" / folder_name / "memory"
@@ -447,7 +348,7 @@ def read_auto_memory(project_dir: Optional[str] = None) -> List[Dict[str, Any]]:
 
 # Topic keywords for auto memory file naming
 _AUTO_MEMORY_TOPICS = {
-    "model-preferences": ["gpt-", "claude-", "gemini-", "o3", "o4", "model", "llm"],
+    "model-preferences": ["gpt-", "gemini-", "o3", "o4", "model", "llm"],
     "tool-usage": ["mcp", "tool", "plugin", "api", "endpoint"],
     "coding-style": ["indent", "format", "style", "naming", "convention", "lint"],
     "environment": ["venv", "env", "docker", "port", "database", "redis", "postgres"],
@@ -479,14 +380,14 @@ def read_all_memory_entries(
 ) -> List[Dict[str, Any]]:
     """Read bullet-point entries from ALL memory tiers for cross-tier deduplication.
 
-    Scans: CLAUDE.md files, rule files, CLAUDE.local.md, and auto memory.
+    Scans: AGENTS.md files, rule files, and auto memory.
 
     Returns list of {text, source_file, source_type, line_number}.
     """
     memory_files = find_memory_files(root_dir)
     entries: List[Dict[str, Any]] = []
 
-    # Read entries from each CLAUDE.md / rule / local file
+    # Read entries from each AGENTS.md / rule file
     for cf in memory_files:
         filepath = Path(cf["path"])
         if cf["type"] == "global":
@@ -517,7 +418,7 @@ def read_all_memory_entries(
                 entries.append(
                     {
                         "text": clean,
-                        "source_file": f"~/.claude/projects/.../memory/{mem['name']}.md",
+                        "source_file": f"~/.config/opencode/projects/.../memory/{mem['name']}.md",
                         "source_type": "auto-memory",
                         "line_number": idx + 1,
                     }
@@ -608,7 +509,7 @@ CORRECTION_PATTERNS = [
 ]
 
 # Guardrail patterns - "don't do X unless" constraints (highest confidence for corrections)
-# These detect user frustrations about Claude making unwanted changes
+# These detect user frustrations about assistant behavior making unwanted changes
 # Format: (regex_pattern, pattern_name, confidence, decay_days)
 GUARDRAIL_PATTERNS = [
     (r"don't (?:add|include|create) .{1,40} unless", "dont-unless-asked", 0.90, 120),
@@ -804,7 +705,7 @@ def extract_user_messages(
     session_file: Path, corrections_only: bool = False
 ) -> List[str]:
     """
-    Extract user messages from a Claude Code session file (JSONL format).
+    Extract user messages from a OpenCode session file (JSONL format).
 
     Args:
         session_file: Path to the session JSONL file
@@ -904,7 +805,7 @@ def should_include_message(text: str) -> bool:
     return True
 
 
-# Backward-compatible alias
+# Compatibility alias
 _should_include_message = should_include_message
 
 
@@ -912,7 +813,7 @@ def extract_tool_rejections(session_file: Path) -> List[str]:
     """
     Extract user corrections from tool rejections in session files.
 
-    Matches the behavior of the legacy bash script which looks for:
+    Matches the behavior of the historical shell script which looks for:
     - type == "user" entries
     - message.content[] array with type == "tool_result"
     - is_error == true
@@ -994,15 +895,15 @@ def extract_tool_rejections(session_file: Path) -> List[str]:
 # Tool execution error patterns
 # =============================================================================
 
-# EXCLUDE: Claude Code guardrails AND global Claude behavior (not project-specific)
+# EXCLUDE: OpenCode guardrails AND global assistant behavior (not project-specific)
 TOOL_ERROR_EXCLUDE_PATTERNS = [
-    # Claude Code guardrails - system enforcing its rules
+    # OpenCode guardrails - system enforcing its rules
     r"File has not been read yet",
     r"exceeds maximum allowed tokens",
     r"InputValidationError",
     r"not valid JSON",
     r"The user doesn't want to proceed",  # User rejections handled separately
-    # Global Claude behavior issues - not project-specific
+    # Global assistant behavior issues - not project-specific
     r"unexpected EOF while looking for matching",  # Bash quoting
     r"EISDIR|illegal operation on a directory",  # File vs dir confusion
     r"syntax error.*eval",  # Bash syntax errors
@@ -1163,7 +1064,7 @@ def aggregate_tool_errors(
     """
     Group errors by type and return those with multiple occurrences.
 
-    Only repeated errors are valuable for CLAUDE.md - one-off errors are noise.
+    Only repeated errors are valuable for AGENTS.md - one-off errors are noise.
 
     Args:
         errors: List of error dicts from extract_tool_errors()
